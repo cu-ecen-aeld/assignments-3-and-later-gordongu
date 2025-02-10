@@ -1,3 +1,8 @@
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
 #include "systemcalls.h"
 
 /**
@@ -16,6 +21,51 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
+
+    // system() returns 0 if successful
+    return system(cmd) == 0;
+
+    // return true;
+}
+
+// do_exec and do_exec_redirect helper function
+bool _do_exec(const char* outputfile, char* command[]) {
+    // create child process and save its pid
+    pid_t pid = fork();
+
+    // check if child process failed to create (fork will return -1)
+    if (pid < 0) return false;
+
+    // check if current process is parent or child (child process has pid of 0)
+    if (pid != 0) {
+        // wait for child process to exit and get its pid and exit status
+        int status;
+        pid_t child_pid = waitpid(pid, &status, 0);
+        
+        // check if child process existed (child pid must be a non-zero positive integer)
+        if (child_pid < 0) return false;
+
+        // check if child process ran and exited successfully (generally success exit codes are 0)
+        if (WEXITSTATUS(status) != 0) return false;
+    } else {
+        // redirect and write contents of stdout to outputfile if outputfile is specified
+        if (outputfile != NULL) {
+            // create using permission bits 0644 and/or open outputfile and save file descriptor
+            const int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, S_IWUSR|S_IRUSR|S_IRGRP|S_IROTH);
+
+            // duplicates fd to file descriptor 1, forcing stdout to write to outputfile when file descriptor 1 opens
+            // file descriptors 0, 1, and 2 are reserved and open on stdin, stdout, and stderr respectively
+            if (dup2(fd, 1) < 0) return false;
+
+            close(fd);
+        }
+
+        // allow child process to execute command along with arguments
+        execv(command[0], &command[0]);
+
+        // exit process with failure exit code as process would not reach this point if exec was successful
+        exit(EXIT_FAILURE);
+    }
 
     return true;
 }
@@ -47,7 +97,7 @@ bool do_exec(int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    // command[count] = command[count];
 
 /*
  * TODO:
@@ -59,9 +109,12 @@ bool do_exec(int count, ...)
  *
 */
 
+    // get return status of exec
+    bool status = _do_exec(NULL, command);
+
     va_end(args);
 
-    return true;
+    return status;
 }
 
 /**
@@ -82,7 +135,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    // command[count] = command[count];
 
 
 /*
@@ -93,7 +146,10 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *
 */
 
+    // get return status of exec
+    bool status = _do_exec(outputfile, command);
+
     va_end(args);
 
-    return true;
+    return status;
 }
