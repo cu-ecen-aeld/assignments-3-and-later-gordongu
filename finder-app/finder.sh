@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Check if arguments exist
 if [ -z "$1" ] || [ -z "$2" ]; then
