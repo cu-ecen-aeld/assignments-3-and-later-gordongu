@@ -1,0 +1,27 @@
+#!/bin/sh
+
+AESD_SOCKET_NAME="aesdsocket"
+AESD_SOCKET_PATH="/usr/bin/${AESD_SOCKET_NAME}"
+
+# Check if argument exists
+if [ -z "$1" ]; then
+    echo "Error: missing arguments"
+    exit 1
+fi
+
+# Process argument and either start or stop the daemon process
+case $1 in
+    start)
+        echo "Starting daemon process ${AESD_SOCKET_NAME}"
+        start-stop-daemon --start --name ${AESD_SOCKET_NAME} --startas ${AESD_SOCKET_PATH} -- -d
+    ;;
+    stop)
+        echo "Stopping daemon process ${AESD_SOCKET_NAME}"
+        start-stop-daemon --stop --name ${AESD_SOCKET_NAME}
+    ;;
+    *)
+        echo "Usage: $0 [ start | stop ]"
+        exit 1
+esac
+
+exit 0
