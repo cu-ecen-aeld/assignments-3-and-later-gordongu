@@ -10,8 +10,6 @@ WRITESTR=AELD_IS_FUN
 WRITEDIR=/tmp/aeld-data
 username=$(cat /etc/finder-app/conf/username.txt)
 
-APPDIR=$(dirname $0)
-
 if [ $# -lt 3 ]
 then
 	echo "Using default value ${WRITESTR} for string to write"
@@ -58,10 +56,10 @@ fi
 for i in $( seq 1 $NUMFILES)
 do
 	#./writer.sh "$WRITEDIR/${username}$i.txt" "$WRITESTR"
-	./${APPDIR}/writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
+	writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
 done
 
-OUTPUTSTRING=$(./${APPDIR}/finder.sh "$WRITEDIR" "$WRITESTR")
+OUTPUTSTRING=$(finder.sh "$WRITEDIR" "$WRITESTR")
 
 # Write OUTPUTSTRING to text file
 echo ${OUTPUTSTRING} > /tmp/assignment4-result.txt
