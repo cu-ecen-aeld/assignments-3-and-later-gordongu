@@ -1,3 +1,4 @@
+CC ?= gcc
 SRC := aesdsocket.c
 TARGET := aesdsocket
 OBJS := $(SRC:.c=.o)
