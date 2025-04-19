@@ -1,4 +1,4 @@
-CC ?= gcc
+CC ?= cc
 SRC := aesdsocket.c
 TARGET := aesdsocket
 OBJS := $(SRC:.c=.o)
@@ -12,8 +12,6 @@ CROSS_COMPILE :=
 # otherwise compile natively
 ifeq ($(CROSS_COMPILE), $(AARCH64_COMPILE))
 	CC := $(AARCH64_COMPILE)gcc
-else
-	CC := cc
 endif
 
 all: $(TARGET)
@@ -24,6 +22,7 @@ $(OBJS): $(SRC)
 	$(CC) -c $(SRC) -o $(OBJS)
 
 $(TARGET): $(OBJS)
+	@type $(CC) >/dev/null 2>&1 || CC := gcc
 	$(CC) $(CFLAGS) $(INCLUDES) $(OBJS) -o $(TARGET) $(LDFLAGS)
 
 clean:
