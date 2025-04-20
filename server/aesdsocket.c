@@ -37,7 +37,6 @@ pthread_mutex_t thread_access = PTHREAD_MUTEX_INITIALIZER;
 
 volatile sig_atomic_t finished = 0;
 
-struct addrinfo *servinfo;
 int socket_fd;
 
 // Exit main loop on interrupt or termination
@@ -119,48 +118,45 @@ void *connection_handler(void *arg) {
         // Check for newline in buffer
         char *newline = memchr(buffer, '\n', size);
         
-        // If newline is found, open file and begin writing to file from buffer
-        if (newline != NULL) {
-            pthread_mutex_lock(&file_access);
-            FILE *fileptr = fopen(filepath, "a+");
+        // If newline is found, exit loop and open file to begin writing to from buffer
+        if (newline != NULL) break;
+    }
 
-            // Write to file from buffer
-            if (fprintf(fileptr, "%s", buffer) < 0) {
-                syslog(LOG_ERR, "Error: unable to write to file");
-                closelog();
-                exit(EXIT_FAILURE);
-            }
+    pthread_mutex_lock(&file_access);
+    FILE *fileptr = fopen(filepath, "a+");
 
-            // Force write to file from buffer
-            fflush(fileptr);
-            // Find file size after write
-            fseek(fileptr, 0, SEEK_END);
-            int filesize = ftell(fileptr);
-            fseek(fileptr, 0, SEEK_SET);
+    // Write to file from buffer
+    if (fprintf(fileptr, "%s", buffer) < 0) {
+        syslog(LOG_ERR, "Error: unable to write to file");
+        closelog();
+        exit(EXIT_FAILURE);
+    }
 
-            ssize_t read;
-            
-            // Begin sending data to incoming connection in BUFF_SIZE-sized chunks
-            while ((read = fread(buffer, sizeof(char), BUFF_SIZE - 1, fileptr)) > 0) {
-                // Null terminate the end of the buffer
-                buffer[read] = '\0';
+    // Force write to file from buffer
+    fflush(fileptr);
+    // Find file size after write
+    fseek(fileptr, 0, SEEK_END);
+    int filesize = ftell(fileptr);
+    fseek(fileptr, 0, SEEK_SET);
 
-                ssize_t sent;
+    ssize_t read;
+    
+    // Begin sending data to incoming connection in BUFF_SIZE-sized chunks
+    while ((read = fread(buffer, sizeof(char), BUFF_SIZE - 1, fileptr)) > 0) {
+        // Null terminate the end of the buffer
+        buffer[read] = '\0';
 
-                if ((sent = send(socket_fd, buffer, read, 0)) < 1) {
-                    syslog(LOG_ERR, "Error: unable to send data to incoming connection");
-                    closelog();
-                    exit(EXIT_FAILURE);
-                }
-            }
-            
-            fclose(fileptr);
-            pthread_mutex_unlock(&file_access);
+        ssize_t sent;
 
-            // Reset for potential new incoming data
-            size = 0;
+        if ((sent = send(socket_fd, buffer, read, 0)) < 1) {
+            syslog(LOG_ERR, "Error: unable to send data to incoming connection");
+            closelog();
+            exit(EXIT_FAILURE);
         }
     }
+    
+    fclose(fileptr);
+    pthread_mutex_unlock(&file_access);
 
     // Cleanup for thread and connection handler
     free(buffer);
@@ -197,6 +193,7 @@ int main(int argc, char *argv[]) {
     hints.ai_flags = AI_PASSIVE;
 
     int new_socket_fd;
+    struct addrinfo *servinfo;
 
     // Check if address info can be retreived
     if (getaddrinfo(NULL, PORT, &hints, &servinfo) != 0) {
@@ -213,6 +210,13 @@ int main(int argc, char *argv[]) {
     // Check if new socket was created successfully
     if ((socket_fd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
         syslog(LOG_ERR, "Error: unable to create socket for listening for incoming connections");
+        closelog();
+        exit(EXIT_FAILURE);
+    }
+
+    int opt = 1;
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        syslog(LOG_ERR, "Error: unable to set SO_REUSEADDR opt for socket");
         closelog();
         exit(EXIT_FAILURE);
     }
@@ -260,7 +264,7 @@ int main(int argc, char *argv[]) {
     fclose(fileptr);
 
     // Check if socket can successfully listen to incoming connections
-    if (listen(socket_fd, 1) < 0) {
+    if (listen(socket_fd, 10) < 0) {
         syslog(LOG_ERR, "Error: socket unable to listen for incoming connections");
         closelog();
         exit(EXIT_FAILURE);
