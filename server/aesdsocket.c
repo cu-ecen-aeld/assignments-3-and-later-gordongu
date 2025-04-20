@@ -53,7 +53,7 @@ void *timestamp_handler(void *arg) {
         sleep(10);
 
         // Exit loop if termination occurred during sleep
-        if (finished) pthread_exit(NULL);
+        if (finished) break;
 
         char timestamp[BUFF_SIZE];
         time_t current_time = time(NULL);
@@ -229,9 +229,26 @@ int main(int argc, char *argv[]) {
 
     while ((option = getopt(argc, argv, "d")) != -1) {
         if (option == 'd') {
-            if (daemon(0, 0) != 0) {
-                syslog(LOG_ERR, "Error: unable to create process as daemon");
+            pid_t pid = fork();
+
+            if (pid < 0) {
+                syslog(LOG_ERR, "Error: unable to fork child process");
+                closelog();
+                exit(EXIT_FAILURE);
+            } else if (pid > 0) {
+                exit(EXIT_SUCCESS);
             }
+
+            if (chdir("/") != 0) {
+                syslog(LOG_ERR, "Error: unable to change directory to root");
+                closelog();
+                exit(EXIT_FAILURE);
+            }
+
+            setsid();
+            close(STDIN_FILENO);
+            close(STDOUT_FILENO);
+            close(STDERR_FILENO);
         }
     }
 
