@@ -105,6 +105,8 @@ void *timestamp_handler(void *arg) {
             exit(EXIT_FAILURE);
         }
 
+        // Force write to file from buffer
+        fflush(fileptr);
         fclose(fileptr);
         pthread_mutex_unlock(&file_access);
     }
@@ -160,6 +162,8 @@ void *connection_handler(void *arg) {
                 exit(EXIT_FAILURE);
             }
 
+            // Force write to file from buffer
+            fflush(fileptr);
             // Find file size after write
             fseek(fileptr, 0, SEEK_END);
             int filesize = ftell(fileptr);
