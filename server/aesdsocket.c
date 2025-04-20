@@ -35,58 +35,25 @@ LIST_HEAD(thread_data_list, thread_data) list_head;
 pthread_mutex_t file_access = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t thread_access = PTHREAD_MUTEX_INITIALIZER;
 
-volatile sig_atomic_t run = 1;
+volatile sig_atomic_t finished = 0;
 
 struct addrinfo *servinfo;
 int socket_fd;
 
-// Close sockets, free dynamically allocated memory, and delete file on interruption or termination signals
+// Exit main loop on interrupt or termination
 void signal_handler(int signo) {
     syslog(LOG_INFO, "Caught signal, exiting");
 
-    if (signo == SIGINT || signo == SIGTERM) {
-        pthread_cancel(timestamp_thread_id);
-        pthread_join(timestamp_thread_id, NULL);
-
-        pthread_mutex_lock(&thread_access);
-        thread_data_t *thread = LIST_FIRST(&list_head);
-
-        while (thread != NULL) {
-            thread_data_t *next = LIST_NEXT(thread, entries);
-            pthread_cancel(thread->thread_id);
-            pthread_mutex_unlock(&thread_access);
-            pthread_join(thread->thread_id, NULL);
-            LIST_REMOVE(thread, entries);
-            pthread_mutex_lock(&thread_access);
-            free(thread);
-            thread = next;
-        }
-        pthread_mutex_unlock(&thread_access);
-
-        pthread_mutex_destroy(&file_access);
-        pthread_mutex_destroy(&thread_access);
-
-        if (close(socket_fd) != 0) {
-            syslog(LOG_ERR, "Error: unable to close socket connection");
-        }
-
-        if (remove(filepath) != 0) {
-            syslog(LOG_ERR, "Error: unable to delete temporary file");
-        }
-
-        closelog();
-    }
-
-    run = 0;
+    if (signo == SIGINT || signo == SIGTERM) finished = 1;
 }
 
 void *timestamp_handler(void *arg) {
-    while (run) {
+    while (!finished) {
         // Wait 10 seconds
         sleep(10);
 
         // Exit loop if termination occurred during sleep
-        if (run != 1) break;
+        if (finished) pthread_exit(NULL);
 
         char timestamp[BUFF_SIZE];
         time_t current_time = time(NULL);
@@ -110,6 +77,8 @@ void *timestamp_handler(void *arg) {
         fclose(fileptr);
         pthread_mutex_unlock(&file_access);
     }
+
+    pthread_exit(NULL);
 }
 
 void *connection_handler(void *arg) {
@@ -291,7 +260,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Main process loop
-    while (run) {
+    while (!finished) {
         // Use select before accept to prevent blocking
         fd_set read_fds;
         FD_ZERO(&read_fds);
@@ -301,11 +270,7 @@ int main(int argc, char *argv[]) {
 
         int status;
 
-        if ((status = select(socket_fd + 1, &read_fds, NULL, NULL, &timeout)) < 0) {
-            syslog(LOG_ERR, "Error: unable to select incoming connection");
-            closelog();
-            exit(EXIT_FAILURE);
-        }
+        if ((status = select(socket_fd + 1, &read_fds, NULL, NULL, &timeout)) < 0) break;
 
         // No connection found so continue to next loop iteration
         if (status == 0) continue;
@@ -377,7 +342,6 @@ int main(int argc, char *argv[]) {
 
     while (thread != NULL) {
         thread_data_t *next = LIST_NEXT(thread, entries);
-        pthread_cancel(thread->thread_id);
         pthread_mutex_unlock(&thread_access);
         pthread_join(thread->thread_id, NULL);
         LIST_REMOVE(thread, entries);

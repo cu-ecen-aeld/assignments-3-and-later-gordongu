@@ -1,6 +1,7 @@
 SRC := aesdsocket.c
 TARGET := aesdsocket
 OBJS := $(SRC:.c=.o)
+CFLAGS := -Wall -Wextra
 
 # value for compiling to aarch64
 AARCH64_COMPILE := aarch64-none-linux-gnu-
