@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <sys/queue.h>
 #include <netdb.h>
 #include <arpa/inet.h>
@@ -64,8 +65,6 @@ void signal_handler(int signo) {
 
         pthread_mutex_destroy(&file_access);
         pthread_mutex_destroy(&thread_access);
-
-        freeaddrinfo(servinfo);
 
         if (close(socket_fd) != 0) {
             syslog(LOG_ERR, "Error: unable to close socket connection");
@@ -263,6 +262,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Free addrinfo after all related calls are finished
+    freeaddrinfo(servinfo);
+
     // Check if socket can successfully listen to incoming connections
     if (listen(socket_fd, 1) < 0) {
         syslog(LOG_ERR, "Error: socket unable to listen for incoming connections");
@@ -282,6 +284,24 @@ int main(int argc, char *argv[]) {
 
     // Main process loop
     while (run) {
+        // Use select before accept to prevent blocking
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(socket_fd, &read_fds);
+
+        struct timeval timeout = {1, 0};
+
+        int status;
+
+        if ((status = select(socket_fd + 1, &read_fds, NULL, NULL, &timeout)) < 0) {
+            syslog(LOG_ERR, "Error: unable to select incoming connection");
+            closelog();
+            exit(EXIT_FAILURE);
+        }
+
+        // No connection found so continue to next loop iteration
+        if (status == 0) continue;
+
         // Check if incoming connection can be accepted and if new socket was created successfully
         if ((new_socket_fd = accept(socket_fd, &connecting_address, &connecting_address_len)) < 0) {
             syslog(LOG_ERR, "Error: unable to accept incoming connection");
@@ -361,8 +381,6 @@ int main(int argc, char *argv[]) {
 
     pthread_mutex_destroy(&file_access);
     pthread_mutex_destroy(&thread_access);
-
-    freeaddrinfo(servinfo);
 
     if (close(socket_fd) != 0) {
         syslog(LOG_ERR, "Error: unable to close socket connection");
