@@ -265,6 +265,10 @@ int main(int argc, char *argv[]) {
     // Free addrinfo after all related calls are finished
     freeaddrinfo(servinfo);
 
+    // Create empty file or truncate existing file at start
+    FILE *fileptr = fopen(filepath, "w");
+    fclose(fileptr);
+
     // Check if socket can successfully listen to incoming connections
     if (listen(socket_fd, 1) < 0) {
         syslog(LOG_ERR, "Error: socket unable to listen for incoming connections");
