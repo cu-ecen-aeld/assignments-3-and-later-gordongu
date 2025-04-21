@@ -77,7 +77,7 @@ void *timestamp_handler(void *arg) {
         pthread_mutex_unlock(&file_access);
     }
 
-    pthread_exit(NULL);
+    return NULL;
 }
 
 void *connection_handler(void *arg) {
@@ -168,7 +168,7 @@ void *connection_handler(void *arg) {
     // Mark thread as completed in params
     thread->completed = 1;
     
-    pthread_exit(NULL);
+    return NULL;
 }
 
 int main(int argc, char *argv[]) {
@@ -215,6 +215,7 @@ int main(int argc, char *argv[]) {
     }
 
     int opt = 1;
+    
     if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
         syslog(LOG_ERR, "Error: unable to set SO_REUSEADDR opt for socket");
         closelog();
@@ -227,6 +228,9 @@ int main(int argc, char *argv[]) {
         closelog();
         exit(EXIT_FAILURE);
     }
+
+    // Free addrinfo after all related calls are finished
+    freeaddrinfo(servinfo);
 
     // Run process as daemon if -d argument is used
     int option;
@@ -256,9 +260,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Free addrinfo after all related calls are finished
-    freeaddrinfo(servinfo);
-
     // Create empty file or truncate existing file at start
     FILE *fileptr = fopen(filepath, "w");
     fclose(fileptr);
@@ -279,6 +280,9 @@ int main(int argc, char *argv[]) {
         closelog();
         exit(EXIT_FAILURE);
     }
+
+    // Detach because of incompatability with pthread_cancel and creating weird memory leaks
+    pthread_detach(timestamp_thread_id);
 
     // Main process loop
     while (!finished) {
@@ -355,8 +359,8 @@ int main(int argc, char *argv[]) {
     }
 
     // Cleanup
-    pthread_cancel(timestamp_thread_id);
-    pthread_join(timestamp_thread_id, NULL);
+    // pthread_cancel(timestamp_thread_id);
+    // pthread_join(timestamp_thread_id, NULL);
 
     pthread_mutex_lock(&thread_access);
     thread_data_t *thread = LIST_FIRST(&list_head);
