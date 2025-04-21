@@ -41,7 +41,7 @@ int socket_fd;
 
 // Exit main loop on interrupt or termination
 void signal_handler(int signo) {
-    syslog(LOG_INFO, "Caught signal, exiting");
+    syslog(LOG_INFO, "Caught signal %i, exiting", signo);
 
     if (signo == SIGINT || signo == SIGTERM) finished = 1;
 }

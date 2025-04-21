@@ -13,7 +13,7 @@ CROSS_COMPILE :=
 ifeq ($(CROSS_COMPILE), $(AARCH64_COMPILE))
 	CC := $(AARCH64_COMPILE)gcc
 else
-	CC ?= cc
+	CC := gcc
 endif
 
 all: $(TARGET)
