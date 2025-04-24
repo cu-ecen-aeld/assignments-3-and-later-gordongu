@@ -32,6 +32,13 @@ int aesd_open(struct inode *inode, struct file *filp)
     /**
      * TODO: handle open
      */
+
+    struct aesd_dev *dev;
+
+    dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
+    filp->private_data = dev;
+    filp->f_pos = 0;
+
     return 0;
 }
 
@@ -41,28 +48,125 @@ int aesd_release(struct inode *inode, struct file *filp)
     /**
      * TODO: handle release
      */
+
+    filp->private_data = NULL;
+
     return 0;
 }
 
-ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
-                loff_t *f_pos)
+ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = 0;
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
     /**
      * TODO: handle read
      */
+
+    struct aesd_dev *dev = (struct aesd_dev *)filp->private_data;
+    struct aesd_buffer_entry *entry;
+    size_t entry_offset;
+    size_t read_size;
+    size_t bytes_not_copied;
+
+    if (mutex_lock_interruptible(&dev->lock)) {
+        return -ERESTARTSYS;
+    }
+
+    entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->circular_buffer, *f_pos, &entry_offset);
+
+    if (!entry || entry->buffptr == NULL) {
+        retval = 0;
+        goto out_unlock;
+    }
+
+    read_size = entry->size - entry_offset;
+
+    if (read_size > count) {
+        read_size = count;
+    }
+
+    bytes_not_copied = copy_to_user(buf, entry->buffptr + entry_offset, read_size);
+    
+    if (bytes_not_copied) {
+        retval = -EFAULT;
+        goto out_unlock;
+    }
+
+    *f_pos += (read_size - bytes_not_copied);
+    retval  = (read_size - bytes_not_copied);
+
+out_unlock:
+    mutex_unlock(&dev->lock);
     return retval;
 }
 
-ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
-                loff_t *f_pos)
+ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
     /**
      * TODO: handle write
      */
+
+    struct aesd_dev *dev = (struct aesd_dev *)filp->private_data;
+    size_t bytes_not_copied;
+    char *new_buf;
+    size_t i = 0;
+    char *newline_ptr;
+
+    if (mutex_lock_interruptible(&dev->lock)) {
+        return -ERESTARTSYS;
+    }
+
+    new_buf = kmalloc(count, GFP_KERNEL);
+
+    if (!new_buf) {
+        retval = -ENOMEM;
+        goto out_unlock;
+    }
+
+    bytes_not_copied = copy_from_user(&new_buf, buf, count);
+
+    if (bytes_not_copied) {
+        retval = -EFAULT;
+        goto out_unlock;
+    }
+
+    retval = (count - bytes_not_copied); 
+
+    while (1) {
+        newline_ptr = memchr(&new_buf[i], '\n', count - i);
+
+        if (! newline_ptr) {
+            break;
+        }
+
+        size_t command_len = (newline_ptr - &new_buf[i]) + 1;
+        struct aesd_buffer_entry entry;
+        entry.size    = command_len;
+        entry.buffptr = kmalloc(command_len, GFP_KERNEL);
+
+        if (! entry.buffptr) {
+            retval = -ENOMEM;
+            goto out_unlock;
+        }
+
+        memcpy((char *)entry.buffptr, &new_buf[i], command_len);
+
+        const char *oldptr = aesd_circular_buffer_add_entry(&dev->circular_buffer, &entry);
+
+        if (oldptr) {
+            kfree((void *)oldptr);
+        }
+
+        i += command_len;
+    }
+
+    kfree(new_buf);
+    new_buf = NULL;
+
+out_unlock:
+    mutex_unlock(&dev->lock);
     return retval;
 }
 struct file_operations aesd_fops = {
@@ -105,6 +209,9 @@ int aesd_init_module(void)
     /**
      * TODO: initialize the AESD specific portion of the device
      */
+    
+    aesd_circular_buffer_init(&aesd_device.circular_buffer);
+    mutex_init(&aesd_device.lock);
 
     result = aesd_setup_cdev(&aesd_device);
 
@@ -118,6 +225,16 @@ int aesd_init_module(void)
 void aesd_cleanup_module(void)
 {
     dev_t devno = MKDEV(aesd_major, aesd_minor);
+
+    uint8_t index;
+    struct aesd_buffer_entry *entry;
+
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.circbuf, index) {
+        if (entry->buffptr) {
+            kfree((void *)entry->buffptr);
+            entry->buffptr = NULL;
+        }
+    }
 
     cdev_del(&aesd_device.cdev);
 
