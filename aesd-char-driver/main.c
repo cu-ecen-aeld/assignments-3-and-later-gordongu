@@ -35,6 +35,7 @@ int aesd_open(struct inode *inode, struct file *filp)
 
     struct aesd_dev *dev;
 
+    // Get container from inode and reserve file pointer private data to container
     dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
     filp->private_data = dev;
     filp->f_pos = 0;
@@ -49,6 +50,7 @@ int aesd_release(struct inode *inode, struct file *filp)
      * TODO: handle release
      */
 
+    // Release file pointer private data
     filp->private_data = NULL;
 
     return 0;
@@ -66,24 +68,30 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_p
     struct aesd_buffer_entry *entry;
     size_t entry_offset;
 
+    // Return with error if mutex cannot be obtained
     if (mutex_lock_interruptible(&dev->lock)) {
         return -ERESTARTSYS;
     }
 
+    // Get entry and entry_offset with given f_pos
     entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->circular_buffer, *f_pos, &entry_offset);
 
+    // Return with error if anything is NULL
     if (entry == NULL || entry->buffptr == NULL) {
         retval = 0;
         goto out_unlock;
     }
 
+    // Read only amount requested or the remaining size of the buffer from the offset position (whichever is less)
     size_t bytes_to_copy = min(entry->size - entry_offset, count);
     
+    // Copy read data to buffer in user space
     if (copy_to_user(buf, entry->buffptr + entry_offset, bytes_to_copy) != 0) {
         retval = -EFAULT;
         goto out_unlock;
     }
 
+    // Adjust f_pos by amount of bytes read
     *f_pos += bytes_to_copy;
     retval = bytes_to_copy;
 
@@ -108,38 +116,47 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 
     entry.buffptr = buffer;
     entry.size = total_count;
-  
+
+    // Return with error if buffer is NULL
     if (entry.buffptr == NULL) {
         goto out;
     }
-  
+
+    // Copy data from previous unfinished write
     if (dev->leftover.buffptr != NULL) {
         memcpy((void *)entry.buffptr, dev->leftover.buffptr, dev->leftover.size);
     }
-  
+
+    // Copy write data from buffer in user space
     if (copy_from_user((void *)entry.buffptr + dev->leftover.size, buf, count) != 0) {
         retval = -EFAULT;
         goto out;
     }
-  
+
+    // Free data from previous unfinished write
     if (dev->leftover.buffptr != NULL) {
         kfree((void *)dev->leftover.buffptr);
         dev->leftover.buffptr = NULL;
         dev->leftover.size = 0;
     }
-  
+
+    // Return with error if mutex cannot be obtained
     if (mutex_lock_interruptible(&dev->lock)) {
         return -ERESTARTSYS;
     }
-  
+
+    // Find newline character occurrence
     newline_ptr = memchr(entry.buffptr, '\n', entry.size);
 
     while (entry.size > 0 && newline_ptr != NULL) {
+        // Copy only the amount of bytes leading up to the newline character
         size_t bytes_to_copy = newline_ptr - (void *)entry.buffptr + 1;
         struct aesd_buffer_entry *duplicate = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
 
+        // Duplicate memory to new temporary buffer
         duplicate->buffptr = kmemdup(entry.buffptr, bytes_to_copy, GFP_KERNEL);
 
+        // Return with error if memory duplication failed
         if (duplicate->buffptr == NULL) {
             retval = -EINVAL;
             goto out_unlock;
@@ -147,17 +164,20 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 
         duplicate->size = bytes_to_copy;
 
+        // Clean up oldest buffer entry if buffer is full
         const char *oldptr = aesd_circular_buffer_add_entry(&dev->circular_buffer, duplicate);
 
         if (oldptr != NULL) {
             kfree((void *)oldptr);
         }
 
+        // Adjust variables and repeat loop until there are no more newline occurrences
         entry.size -= bytes_to_copy;
         entry.buffptr += bytes_to_copy;
         newline_ptr = memchr(entry.buffptr, '\n', entry.size);
     }
-  
+
+    // Save remaining data after last newline occurrence to be written in the next write operation
     if (entry.size > 0) {
         dev->leftover.buffptr = kmemdup(entry.buffptr, entry.size, GFP_KERNEL);
 
@@ -169,6 +189,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
         dev->leftover.size = entry.size;
     }
 
+    // Adjust f_pos by amount of bytes written
     *f_pos += count;
     retval = count;
   
@@ -220,6 +241,7 @@ int aesd_init_module(void)
      * TODO: initialize the AESD specific portion of the device
      */
     
+    // Initialize circular buffer and mutex
     aesd_circular_buffer_init(&aesd_device.circular_buffer);
     mutex_init(&aesd_device.lock);
 
@@ -245,6 +267,7 @@ void aesd_cleanup_module(void)
      * TODO: cleanup AESD specific poritions here as necessary
      */
 
+    // Free all entries in the circular buffer
     AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.circular_buffer, index) {
         if (entry->buffptr != NULL) {
             kfree((void *)entry->buffptr);
@@ -252,12 +275,14 @@ void aesd_cleanup_module(void)
         }
     }
 
+    // Free data in the leftover buffer entry
     if (aesd_device.leftover.buffptr != NULL) {
         kfree((void *)aesd_device.leftover.buffptr);
         aesd_device.leftover.buffptr = NULL;
         aesd_device.leftover.size = 0;
     }
 
+    // Free mutex
     mutex_destroy(&aesd_device.lock);
 
     unregister_chrdev_region(devno, 1);
