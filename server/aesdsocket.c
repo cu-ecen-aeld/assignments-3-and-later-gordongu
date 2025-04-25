@@ -14,9 +14,19 @@
 #include <pthread.h>
 
 // Constants
+#ifndef USE_AESD_CHAR_DEVICE
+#define USE_AESD_CHAR_DEVICE 1
+#endif
+
+#if USE_AESD_CHAR_DEVICE
+#define FILE_PATH "/dev/aesdchar"
+#else
+#define FILE_PATH "/var/tmp/aesdsocketdata"
+#endif
+
 #define PORT "9000"
 #define BUFF_SIZE 1024
-const char *filepath = "/var/tmp/aesdsocketdata";
+// const char *filepath = "/var/tmp/aesdsocketdata";
 
 // Timestamp handler thread ID
 pthread_t timestamp_thread_id;
@@ -46,6 +56,7 @@ void signal_handler(int signo) {
     if (signo == SIGINT || signo == SIGTERM) finished = 1;
 }
 
+#if !USE_AESD_CHAR_DEVICE
 void *timestamp_handler(void *arg) {
     while (!finished) {
         // Wait 10 seconds
@@ -79,6 +90,7 @@ void *timestamp_handler(void *arg) {
 
     return NULL;
 }
+#endif
 
 void *connection_handler(void *arg) {
     // Get and cast thread params from arg
@@ -123,7 +135,7 @@ void *connection_handler(void *arg) {
     }
 
     pthread_mutex_lock(&file_access);
-    FILE *fileptr = fopen(filepath, "a+");
+    FILE *fileptr = fopen(FILE_PATH, "a+");
 
     // Write to file from buffer
     if (fprintf(fileptr, "%s", buffer) < 0) {
@@ -261,8 +273,10 @@ int main(int argc, char *argv[]) {
     }
 
     // Create empty file or truncate existing file at start
-    FILE *fileptr = fopen(filepath, "w");
+    #if !USE_AESD_CHAR_DEVICE
+    FILE *fileptr = fopen(FILE_PATH, "w");
     fclose(fileptr);
+    #endif
 
     // Check if socket can successfully listen to incoming connections
     if (listen(socket_fd, 10) < 0) {
@@ -275,6 +289,7 @@ int main(int argc, char *argv[]) {
     LIST_INIT(&list_head);
 
     // Create timestamp handler thread
+    #if !USE_AESD_CHAR_DEVICE
     if (pthread_create(&timestamp_thread_id, NULL, timestamp_handler, NULL) != 0) {
         syslog(LOG_ERR, "Error: unable to create thread for handling timestamps");
         closelog();
@@ -283,6 +298,7 @@ int main(int argc, char *argv[]) {
 
     // Detach because of incompatability with pthread_cancel and creating weird memory leaks
     pthread_detach(timestamp_thread_id);
+    #endif
 
     // Main process loop
     while (!finished) {
@@ -383,7 +399,7 @@ int main(int argc, char *argv[]) {
         syslog(LOG_ERR, "Error: unable to close socket connection");
     }
 
-    if (remove(filepath) != 0) {
+    if (remove(FILE_PATH) != 0) {
         syslog(LOG_ERR, "Error: unable to delete temporary file");
     }
 
