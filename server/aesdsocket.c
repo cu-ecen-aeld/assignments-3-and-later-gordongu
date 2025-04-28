@@ -372,11 +372,12 @@ int main(int argc, char *argv[]) {
             // Null terminate the end of the buffer
             buffer[received] = '\0';
 
-            // Write to file from buffer
+            // Write to file from buffer and check if command is ioctl
             if (strncmp(buffer, IOCTL_CMD, strlen(IOCTL_CMD)) == 0) {
                 unsigned int write_cmd, write_cmd_offset;
                 ioctl_enabled = 1;
 
+                // Obtain write_cmd and write_cmd offset from buffer 
                 if (sscanf(buffer, "AESDCHAR_IOCSEEKTO:%u,%u", &write_cmd, &write_cmd_offset) == 2) {
                     struct aesd_seekto seekto;
                     seekto.write_cmd = write_cmd;
@@ -389,6 +390,7 @@ int main(int argc, char *argv[]) {
                         exit(EXIT_FAILURE);
                     }
 
+                    // Execute ioctl operation
                     if (ioctl(fd, AESDCHAR_IOCSEEKTO, &seekto) == 0) {
                         size_t bytes_read = 0;
 
@@ -408,6 +410,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
             } else {
+                // Normal write to file
                 if (fprintf(fileptr, "%s", buffer) < 0) {
                     syslog(LOG_ERR, "Error: unable to write to file");
                     closelog();

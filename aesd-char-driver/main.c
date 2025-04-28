@@ -208,12 +208,14 @@ static loff_t aesd_llseek(struct file *filp, loff_t offset, int whence) {
     struct aesd_buffer_entry *entry;
     uint8_t index = 0;
 
+    // Return with error if mutex cannot be obtained
     if (mutex_lock_interruptible(&dev->lock)) {
         return -ERESTARTSYS;
     }
 
     loff_t total_size = 0;
 
+    // Loop through circular buffer and obtain total size from each entry
     AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.circular_buffer, index) {
         total_size += entry->size;
     }
@@ -227,19 +229,23 @@ static long aesd_adjust_file_offset(struct file *filp, struct aesd_seekto *seekt
     loff_t newpos = 0;
     long retval = 0;
     
+    // Return with error if mutex cannot be obtained
     if (mutex_lock_interruptible(&dev->lock)) {
         return -ERESTARTSYS;
     }
 
+    // Return error if write_cmd exceeds limitations
     if ((seekto->write_cmd >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) || (seekto->write_cmd_offset >= dev->circular_buffer.entry[seekto->write_cmd].size)) {
         retval = -EINVAL;
         goto out;
     }
 
+    // Seek f_pos new start point
     for (int i = 0; i < seekto->write_cmd; i++) {
         newpos = newpos + dev->circular_buffer.entry[i].size;
     }
 
+    // Adjust new f_pos with offset
     newpos += seekto->write_cmd_offset;
     filp->f_pos = newpos;
     retval = 0; 
@@ -254,20 +260,17 @@ static long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
     long retval = -ENOTTY;
     struct aesd_seekto seekto;
 
-    switch (cmd) {
-    case AESDCHAR_IOCSEEKTO:
+    if (cmd == AESDCHAR_IOCSEEKTO) {
+        // Copy seekto params from user space and adjust file offset
         if (copy_from_user(&seekto, (const void __user *)arg, sizeof(seekto)) != 0)
-            return -EFAULT;
+            retval = -EFAULT;
         else {
          	retval = aesd_adjust_file_offset(filp, &seekto); 
 
          	if (retval != 0) {
-                return -EFAULT;
+                retval = -EFAULT;
             }
         }     
-        break;
-    default:
-        return -ENOTTY;
     }
 
     return retval;
